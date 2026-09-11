@@ -344,6 +344,20 @@
 const USERS_KEY = 'jk_inquiry_users';
 const CURRENT_USER_KEY = 'jk_inquiry_current_user';
 const FIREBASE_CFG_KEY = 'jk_inquiry_firebase_cfg';
+
+// Firebase config is fixed here so every device connects automatically —
+// no need to paste config on new devices/browsers.
+const HARDCODED_FIREBASE_CONFIG = {
+  apiKey: "AIzaSyBAK95s01LTGQ0R_H08pVdP4-NRXWLrwpc",
+  authDomain: "jay-khodiyar-8ad32.firebaseapp.com",
+  databaseURL: "https://jay-khodiyar-8ad32-default-rtdb.firebaseio.com",
+  projectId: "jay-khodiyar-8ad32",
+  storageBucket: "jay-khodiyar-8ad32.firebasestorage.app",
+  messagingSenderId: "621441145597",
+  appId: "1:621441145597:web:26b65a9d7984dae970fc94",
+  measurementId: "G-YR7Q3E08EK"
+};
+
 let db, currentUser = null, currentPay = '';
 let allInquiries = [];
 let activeFilter = 'all';
@@ -357,20 +371,18 @@ function getUsers(){
 function saveUsers(list){ localStorage.setItem(USERS_KEY, JSON.stringify(list)); }
 
 function initApp(){
-  const cfg = localStorage.getItem(FIREBASE_CFG_KEY);
-  if(!cfg){
-    document.getElementById('setupScreen').style.display = 'flex';
-    return;
-  }
   try{
-    const parsed = JSON.parse(cfg);
-    firebase.initializeApp(parsed);
+    firebase.initializeApp(HARDCODED_FIREBASE_CONFIG);
     db = firebase.firestore();
     db.enablePersistence({synchronizeTabs:true}).catch(()=>{});
   }catch(e){
-    localStorage.removeItem(FIREBASE_CFG_KEY);
-    document.getElementById('setupScreen').style.display = 'flex';
-    return;
+    // already initialized (e.g. hot reload) - reuse existing app
+    if(firebase.apps.length){
+      db = firebase.firestore();
+    } else {
+      document.getElementById('setupScreen').style.display = 'flex';
+      return;
+    }
   }
   checkLogin();
 }
