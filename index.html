@@ -210,8 +210,8 @@
     </div>
     <div class="stats">
       <div class="stat-card"><div class="num" id="statTotal">0</div><div class="lbl">કુલ</div></div>
-      <div class="stat-card"><div class="num" id="statFollowup">0</div><div class="lbl">ફોલોઅપ</div></div>
-      <div class="stat-card"><div class="num" id="statConverted">0</div><div class="lbl">કન્વર્ટ</div></div>
+      <div class="stat-card"><div class="num" id="statFollowup">0</div><div class="lbl">ઓપન</div></div>
+      <div class="stat-card"><div class="num" id="statConverted">0</div><div class="lbl">ક્લોઝ</div></div>
       <div class="stat-card"><div class="num" id="statToday">0</div><div class="lbl">આજે ડ્યુ</div></div>
     </div>
   </header>
@@ -263,11 +263,11 @@
         <textarea id="fAddress" rows="2" placeholder="ગામ / વિસ્તાર" oninput="this.value=this.value.toUpperCase()" style="text-transform:uppercase;"></textarea>
       </div>
       <div class="form-group">
-        <label>પેમેન્ટ પ્રકાર</label>
+        <label>પેમેન્ટ પ્રકાર (એક કરતાં વધુ પસંદ કરી શકાય)</label>
         <div class="pay-options" id="payOptions">
-          <div class="pay-opt" data-val="Cash" onclick="selectPay('Cash')">💵 Cash</div>
-          <div class="pay-opt" data-val="Finance" onclick="selectPay('Finance')">🏦 Finance</div>
-          <div class="pay-opt" data-val="Exchange" onclick="selectPay('Exchange')">🔄 Exchange</div>
+          <div class="pay-opt" data-val="Cash" onclick="togglePay('Cash')">💵 Cash</div>
+          <div class="pay-opt" data-val="Finance" onclick="togglePay('Finance')">🏦 Finance</div>
+          <div class="pay-opt" data-val="Exchange" onclick="togglePay('Exchange')">🔄 Exchange</div>
         </div>
       </div>
       <div class="form-group">
@@ -371,7 +371,7 @@ const HARDCODED_FIREBASE_CONFIG = {
   measurementId: "G-YR7Q3E08EK"
 };
 
-let db, currentUser = null, currentPay = '';
+let db, currentUser = null, currentPaySet = [];
 let allInquiries = [];
 
 
@@ -428,14 +428,10 @@ function saveFirebaseConfig(){
 
 /* ================= LOGIN ================= */
 function checkLogin(){
-  const saved = localStorage.getItem(CURRENT_USER_KEY);
-  if(saved){
-    currentUser = saved;
-    startApp();
-  } else {
-    renderLoginScreen();
-    document.getElementById('loginScreen').style.display = 'flex';
-  }
+  // Always ask "who is using it right now" — PC/device is shared by multiple employees,
+  // so we never auto-continue as whoever used it last.
+  renderLoginScreen();
+  document.getElementById('loginScreen').style.display = 'flex';
 }
 function renderLoginScreen(){
   const wrap = document.getElementById('userBtnList');
@@ -529,9 +525,9 @@ function renderList(){
     }
     return true;
   });
-  // "today's work" — overdue first, then soonest
-  if(activeFilter==='today'){
-    filtered.sort((a,b)=> (a.followup||'') < (b.followup||'') ? -1 : 1);
+  // "today's work" and "Follow-up" tab — soonest/nearest follow-up date first (who to call first)
+  if(activeFilter==='today' || activeFilter==='followup'){
+    filtered.sort((a,b)=> (a.followup||'9999') < (b.followup||'9999') ? -1 : 1);
   }
 
   // update chip counts
@@ -592,7 +588,7 @@ function renderList(){
       <div class="card-meta">
         ${inq.model ? `<span class="meta-tag">🏍️ ${escapeHtml(inq.model)}</span>` : ''}
         ${inq.payType ? `<span class="meta-tag pay">${payEmoji(inq.payType)} ${inq.payType}</span>` : ''}
-        ${inq.leadSource ? `<span class="meta-tag">📍 ${escapeHtml(inq.leadSource)}</span>` : ''}
+        ${inq.leadSource ? `<span class="meta-tag">🏷️ ${escapeHtml(inq.leadSource)}</span>` : ''}
       </div>
       ${inq.address ? `<div class="card-address">📍 ${escapeHtml(inq.address)}</div>` : ''}
       ${followupHtml}
@@ -625,7 +621,8 @@ function renderList(){
   });
 }
 
-function payEmoji(p){ return p==='Cash'?'💵':p==='Finance'?'🏦':p==='Exchange'?'🔄':'💰'; }
+function payEmojiOne(p){ return p==='Cash'?'💵':p==='Finance'?'🏦':p==='Exchange'?'🔄':'💰'; }
+function payEmoji(p){ return (p||'').split(',').map(s=>payEmojiOne(s.trim())).join(''); }
 function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
 function formatDate(d){ if(!d) return ''; const [y,m,day]=d.split('-'); return `${day}/${m}/${y}`; }
 function formatDateTime(ts){
@@ -637,8 +634,8 @@ function formatDateTime(ts){
 
 function updateStats(){
   document.getElementById('statTotal').textContent = allInquiries.length;
-  document.getElementById('statFollowup').textContent = allInquiries.filter(i=>i.status==='followup').length;
-  document.getElementById('statConverted').textContent = allInquiries.filter(i=>i.status==='converted').length;
+  document.getElementById('statFollowup').textContent = allInquiries.filter(i=>i.status==='new' || i.status==='followup').length;
+  document.getElementById('statConverted').textContent = allInquiries.filter(i=>i.status==='converted' || i.status==='lost').length;
   const today = todayStr();
   document.getElementById('statToday').textContent = allInquiries.filter(i=>i.followup===today && i.status!=='converted' && i.status!=='lost').length;
 }
@@ -646,7 +643,7 @@ function updateStats(){
 /* ================= FORM ================= */
 function openForm(inq){
   document.getElementById('inquiryForm').reset();
-  currentPay = '';
+  currentPaySet = [];
   document.querySelectorAll('.pay-opt').forEach(p=>p.classList.remove('sel'));
   if(inq && inq.id){
     document.getElementById('formTitle').textContent = 'ઇન્ક્વાયરી એડિટ કરો';
@@ -659,7 +656,9 @@ function openForm(inq){
     document.getElementById('fFollowup').value = inq.followup||'';
     document.getElementById('fNote').value = inq.note||'';
     document.getElementById('fLeadSource').value = inq.leadSource||'';
-    if(inq.payType) selectPay(inq.payType);
+    if(inq.payType){
+      inq.payType.split(',').map(s=>s.trim()).filter(Boolean).forEach(v=> togglePay(v, true));
+    }
     document.getElementById('deleteLink').style.display = 'block';
   } else {
     document.getElementById('formTitle').textContent = 'નવી ઇન્ક્વાયરી';
@@ -669,10 +668,17 @@ function openForm(inq){
   document.getElementById('formOverlay').classList.add('show');
 }
 function closeForm(){ document.getElementById('formOverlay').classList.remove('show'); }
-function selectPay(val){
-  currentPay = val;
+function togglePay(val, forceOn){
+  const idx = currentPaySet.indexOf(val);
+  if(forceOn){
+    if(idx===-1) currentPaySet.push(val);
+  } else if(idx>-1){
+    currentPaySet.splice(idx,1);
+  } else {
+    currentPaySet.push(val);
+  }
   document.querySelectorAll('.pay-opt').forEach(p=>{
-    p.classList.toggle('sel', p.dataset.val===val);
+    p.classList.toggle('sel', currentPaySet.includes(p.dataset.val));
   });
 }
 
@@ -701,7 +707,7 @@ function submitForm(e){
     mobile: mobile,
     model: document.getElementById('fModel').value.trim(),
     address: document.getElementById('fAddress').value.trim(),
-    payType: currentPay,
+    payType: currentPaySet.join(', '),
     leadSource: document.getElementById('fLeadSource').value,
     status: document.getElementById('fStatus').value,
     followup: document.getElementById('fFollowup').value,
