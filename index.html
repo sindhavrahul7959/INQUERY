@@ -375,13 +375,43 @@ let db, currentUser = null, currentPaySet = [];
 let allInquiries = [];
 
 
+const DEFAULT_USERS = ['Rahul', 'Sanjay', 'Arjun', 'Raj', 'Jaydip', 'Abhay'];
 function getUsers(){
   const raw = localStorage.getItem(USERS_KEY);
-  let list = raw ? JSON.parse(raw) : ['Rahul', 'Sanjay', 'Arjun', 'Raj', 'Jaydip'];
-  ['Raj','Jaydip'].forEach(n=>{ if(!list.includes(n)) list.push(n); });
+  let list = raw ? JSON.parse(raw) : DEFAULT_USERS.slice();
+  DEFAULT_USERS.forEach(n=>{ if(!list.includes(n)) list.push(n); });
   return list;
 }
 function saveUsers(list){ localStorage.setItem(USERS_KEY, JSON.stringify(list)); }
+
+/* ---- Cloud-synced user list (so a name added on one device shows on all devices) ---- */
+function usersDocRef(){ return db.collection('config').doc('staffList'); }
+function syncUsersFromCloud(onUpdate){
+  usersDocRef().onSnapshot(doc=>{
+    let list;
+    if(doc.exists && Array.isArray(doc.data().list) && doc.data().list.length){
+      list = doc.data().list;
+    } else {
+      // first run: seed the cloud doc with whatever we know locally
+      list = getUsers();
+      usersDocRef().set({list: list}).catch(()=>{});
+    }
+    saveUsers(list);
+    if(onUpdate) onUpdate(list);
+  }, err=>{
+    console.error('user list sync error', err);
+    if(onUpdate) onUpdate(getUsers());
+  });
+}
+function addUserToCloud(name){
+  usersDocRef().set({
+    list: firebase.firestore.FieldValue.arrayUnion(name)
+  }, {merge:true}).catch(()=>{
+    // offline fallback — still add locally so this device works immediately
+    const list = getUsers();
+    if(!list.includes(name)){ list.push(name); saveUsers(list); }
+  });
+}
 
 function initApp(){
   try{
@@ -430,13 +460,19 @@ function saveFirebaseConfig(){
 function checkLogin(){
   // Always ask "who is using it right now" — PC/device is shared by multiple employees,
   // so we never auto-continue as whoever used it last.
-  renderLoginScreen();
+  renderLoginScreen(getUsers()); // show cached list instantly (works offline too)
   document.getElementById('loginScreen').style.display = 'flex';
+  // then keep it live-synced with the cloud list (so names added on other devices show up here)
+  syncUsersFromCloud(list=>{
+    if(document.getElementById('loginScreen').style.display === 'flex'){
+      renderLoginScreen(list);
+    }
+  });
 }
-function renderLoginScreen(){
+function renderLoginScreen(list){
   const wrap = document.getElementById('userBtnList');
   wrap.innerHTML = '';
-  getUsers().forEach(u=>{
+  (list||getUsers()).forEach(u=>{
     const b = document.createElement('button');
     b.className = 'user-btn';
     b.textContent = '👤  ' + u;
@@ -447,10 +483,11 @@ function renderLoginScreen(){
 function addNewUser(){
   const name = prompt('નામ લખો:');
   if(name && name.trim()){
+    const trimmed = name.trim();
     const users = getUsers();
-    users.push(name.trim());
-    saveUsers(users);
-    renderLoginScreen();
+    if(!users.includes(trimmed)){ users.push(trimmed); saveUsers(users); }
+    addUserToCloud(trimmed);
+    renderLoginScreen(users);
   }
 }
 function logout(){
